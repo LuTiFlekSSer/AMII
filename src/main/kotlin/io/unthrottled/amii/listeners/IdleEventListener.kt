@@ -24,6 +24,11 @@ import java.awt.event.InputEvent
 import java.awt.event.MouseEvent
 import java.util.concurrent.TimeUnit
 
+private const val MIN_ALARM_TIMEOUT_MINUTES = 1L
+
+internal fun minutesToAlarmDelayMillis(minutes: Long): Long =
+  TimeUnit.MINUTES.toMillis(minutes.coerceAtLeast(MIN_ALARM_TIMEOUT_MINUTES))
+
 class IdleEventListener(private val project: Project) : Runnable, Disposable, AWTEventListener {
   private val messageBus = ApplicationManager.getApplication().messageBus.connect()
   private val log = Logger.getInstance(this::class.java)
@@ -42,11 +47,7 @@ class IdleEventListener(private val project: Project) : Runnable, Disposable, AW
     }
   }
 
-  private var idleTimeout =
-    TimeUnit.MILLISECONDS.convert(
-      getCurrentTimoutInMinutes(),
-      TimeUnit.MINUTES
-    ).toInt()
+  private var idleTimeout = minutesToAlarmDelayMillis(getCurrentTimoutInMinutes())
   private val idleAlarm = Alarm()
 
   init {
@@ -55,10 +56,7 @@ class IdleEventListener(private val project: Project) : Runnable, Disposable, AW
       CONFIG_TOPIC,
       ConfigListener { newPluginState ->
         idleAlarm.cancelAllRequests()
-        self.idleTimeout = TimeUnit.MILLISECONDS.convert(
-          newPluginState.idleTimeoutInMinutes,
-          TimeUnit.MINUTES
-        ).toInt()
+        self.idleTimeout = minutesToAlarmDelayMillis(newPluginState.idleTimeoutInMinutes)
         idleAlarm.addRequest(self, self.idleTimeout)
       }
     )

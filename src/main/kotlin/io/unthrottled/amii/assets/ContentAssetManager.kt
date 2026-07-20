@@ -1,16 +1,15 @@
 package io.unthrottled.amii.assets
 
-import com.intellij.openapi.application.ApplicationManager
 import io.unthrottled.amii.integrations.RestTools
 import io.unthrottled.amii.tools.toOptional
+import io.unthrottled.amii.tools.writeAtomically
 import org.apache.commons.io.IOUtils
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
+import java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
 import java.util.Optional
-import java.util.concurrent.Callable
 
 enum class AssetCategory(val category: String) {
   VISUALS("visuals"),
@@ -81,19 +80,13 @@ object ContentAssetManager {
     remoteAssetUrl: String
   ): Optional<URI> {
     LocalStorageService.createDirectories(localAssetPath)
-    return ApplicationManager.getApplication().executeOnPooledThread(
-      Callable {
-        RestTools.performRequest(remoteAssetUrl) { inputStream ->
-          Files.newOutputStream(
-            localAssetPath,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING
-          ).use { bufferedWriter ->
-            IOUtils.copy(inputStream, bufferedWriter)
-          }
-          localAssetPath.toUri()
+    return RestTools.performRequest(remoteAssetUrl) { inputStream ->
+      writeAtomically(localAssetPath) { temporaryFile ->
+        Files.newOutputStream(temporaryFile, TRUNCATE_EXISTING).use { outputStream ->
+          IOUtils.copy(inputStream, outputStream)
         }
       }
-    ).get()
+      localAssetPath.toUri()
+    }
   }
 }

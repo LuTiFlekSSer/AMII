@@ -25,6 +25,10 @@ object LocalVisualContentManager : Logging, Disposable, ConfigListener {
 
   private val messageBusConnection = ApplicationManager.getApplication().messageBus.connect()
 
+  @Volatile
+  private var cachedAssets: Set<VisualAssetRepresentation> = emptySet()
+  private var ledger = LocalVisualAssetStorageService.getInitialItem()
+
   init {
     messageBusConnection.subscribe(ConfigListener.CONFIG_TOPIC, this)
     ApplicationManager.getApplication().executeOnPooledThread {
@@ -32,7 +36,6 @@ object LocalVisualContentManager : Logging, Disposable, ConfigListener {
     }
   }
 
-  private var cachedAssets: Set<VisualAssetRepresentation> = emptySet()
   fun supplyAllExistingVisualAssetRepresentations(): Set<VisualAssetRepresentation> {
     return cachedAssets
   }
@@ -42,8 +45,6 @@ object LocalVisualContentManager : Logging, Disposable, ConfigListener {
       AssetFetchOptions()
     )
   }
-
-  private var ledger = LocalVisualAssetStorageService.getInitialItem()
 
   fun supplyAllUserModifiedVisualRepresentations(): Set<VisualAssetRepresentation> {
     return ledger.savedVisualAssets.values.toSet()

@@ -6,10 +6,12 @@ import com.intellij.util.messages.Topic
 import io.unthrottled.amii.assets.AssetStatus.NOT_DOWNLOADED
 import io.unthrottled.amii.assets.AssetStatus.STALE
 import io.unthrottled.amii.assets.LocalContentService.hasAPIAssetChanged
+import io.unthrottled.amii.services.ExecutionService
 import io.unthrottled.amii.tools.Logging
 import io.unthrottled.amii.tools.logger
 import io.unthrottled.amii.tools.runSafelyWithResult
 import io.unthrottled.amii.tools.toOptional
+import io.unthrottled.amii.tools.writeAtomically
 import org.apache.commons.io.IOUtils
 import java.io.InputStream
 import java.net.URI
@@ -36,6 +38,8 @@ interface APIAssetListener {
 }
 
 object APIAssetManager : Logging {
+
+  private val refreshesInProgress = ConcurrentHashMap.newKeySet<Path>()
 
   /**
    * Will return a resolvable URL that can be used to reference an asset.
@@ -90,17 +94,39 @@ object APIAssetManager : Logging {
   ): Optional<URI> {
     val (apiAssetStatus, metaData) = hasAPIAssetChanged(localAssetPath)
     return when {
-      apiAssetStatus == STALE && metaData is Instant ->
-        downloadAndUpdateAssetDefinitions(
-          localAssetPath,
-          "$apiPath?changedSince=${metaData.epochSecond}",
-          assetConverter
-        ).toOptional()
-      apiAssetStatus == NOT_DOWNLOADED ||
-        (apiAssetStatus == STALE && metaData == null) -> downloadAndGetAssetUrl(localAssetPath, apiPath)
+      apiAssetStatus == STALE && Files.exists(localAssetPath) -> {
+        scheduleRefresh(localAssetPath, apiPath, metaData as? Instant, assetConverter)
+        localAssetPath.toUri().toOptional()
+      }
+      apiAssetStatus == NOT_DOWNLOADED -> downloadAndGetAssetUrl(localAssetPath, apiPath)
       Files.exists(localAssetPath) ->
         localAssetPath.toUri().toOptional()
       else -> Optional.empty()
+    }
+  }
+
+  private fun <T : AssetRepresentation> scheduleRefresh(
+    localAssetPath: Path,
+    apiPath: String,
+    lastSuccessfulCheck: Instant?,
+    assetConverter: (InputStream) -> Optional<List<T>>
+  ) {
+    if (refreshesInProgress.add(localAssetPath).not()) return
+
+    ExecutionService.executeAsynchronously {
+      try {
+        if (lastSuccessfulCheck == null) {
+          downloadAndGetAssetUrl(localAssetPath, apiPath)
+        } else {
+          downloadAndUpdateAssetDefinitions(
+            localAssetPath,
+            "$apiPath?changedSince=${lastSuccessfulCheck.epochSecond}",
+            assetConverter
+          )
+        }
+      } finally {
+        refreshesInProgress.remove(localAssetPath)
+      }
     }
   }
 
@@ -119,13 +145,16 @@ object APIAssetManager : Logging {
   ): Optional<URI> {
     LocalStorageService.createDirectories(localAssetPath)
     return AssetAPI.getAsset(apiPath) { inputStream ->
-      Files.newOutputStream(
-        localAssetPath,
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING
-      ).use { bufferedWriter ->
-        IOUtils.copy(inputStream, bufferedWriter)
+      writeAtomically(localAssetPath) { temporaryFile ->
+        Files.newOutputStream(
+          temporaryFile,
+          StandardOpenOption.TRUNCATE_EXISTING
+        ).use { bufferedWriter ->
+          IOUtils.copy(inputStream, bufferedWriter)
+        }
       }
+
+      AssetCheckService.writeCheckedDate(localAssetPath)
 
       ApplicationManager.getApplication().messageBus
         .syncPublisher(APIAssetListener.TOPIC)
@@ -166,15 +195,18 @@ object APIAssetManager : Logging {
               seenAssets.add(it.id)
             }.filter { it != null }.collect(Collectors.toList())
 
-          Files.newBufferedWriter(
-            localAssetPath,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING
-          ).use { bufferedWriter ->
-            bufferedWriter.write(
-              Gson().toJson(updatedAssets)
-            )
+          writeAtomically(localAssetPath) { temporaryFile ->
+            Files.newBufferedWriter(
+              temporaryFile,
+              StandardOpenOption.TRUNCATE_EXISTING
+            ).use { bufferedWriter ->
+              bufferedWriter.write(
+                Gson().toJson(updatedAssets)
+              )
+            }
           }
+
+          AssetCheckService.writeCheckedDate(localAssetPath)
 
           ApplicationManager.getApplication().messageBus
             .syncPublisher(APIAssetListener.TOPIC)

@@ -3,6 +3,7 @@ package io.unthrottled.amii.memes
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.util.messages.Topic
 import io.unthrottled.amii.assets.AudibleContent
@@ -14,6 +15,7 @@ import io.unthrottled.amii.events.UserEvent
 import io.unthrottled.amii.memes.player.MemePlayer
 import io.unthrottled.amii.memes.player.MemePlayerFactory
 import io.unthrottled.amii.tools.toOptional
+import java.awt.Dimension
 import javax.swing.JLayeredPane
 
 enum class MemeMetadata {
@@ -90,7 +92,8 @@ class Meme(
     private val visualMemeContent: VisualMemeContent,
     private val audibleContent: AudibleContent?,
     private val rootPane: JLayeredPane,
-    private val project: Project
+    private val project: Project,
+    private val cappedDimensions: Dimension?
   ) {
     private var notificationMode = Config.instance.notificationMode
     private var notificationAnchor = Config.instance.notificationAnchor
@@ -130,6 +133,7 @@ class Meme(
           rootPane,
           visualMemeContent,
           memePlayer,
+          cappedDimensions,
           MemePanelSettings(
             notificationMode,
             notificationAnchor,
@@ -151,15 +155,13 @@ class Meme(
       }
     }
 
-    if (metadata[MemeMetadata.RUN_ON_NON_UI_THREAD.name] == true) {
-      // allows the meme to show up when a Dialog is open :)
-      ApplicationManager.getApplication().executeOnPooledThread {
-        displayMeme()
-      }
+    val application = ApplicationManager.getApplication()
+    if (application.isDispatchThread) {
+      displayMeme()
     } else {
-      ApplicationManager.getApplication().invokeLater {
-        displayMeme()
-      }
+      // ModalityState.any() keeps the old ability to display while a dialog is
+      // open without ever touching Swing from a pooled thread.
+      application.invokeLater({ displayMeme() }, ModalityState.any())
     }
   }
 
@@ -198,7 +200,11 @@ class Meme(
           listeners.forEach {
             it.onRemoval()
           }
-          memePlayer?.stop()
+          if (memePlayer != null) {
+            ApplicationManager.getApplication().executeOnPooledThread {
+              memePlayer.stop()
+            }
+          }
         }
       }
     )
@@ -211,10 +217,19 @@ class Meme(
   }
 
   fun dismiss() {
-    memePanel.dismiss()
+    runOnUiThread { memePanel.dismiss() }
   }
 
   override fun dispose() {
-    memePanel.dispose()
+    runOnUiThread { memePanel.dispose() }
+  }
+
+  private fun runOnUiThread(action: () -> Unit) {
+    val application = ApplicationManager.getApplication()
+    if (application.isDispatchThread) {
+      action()
+    } else {
+      application.invokeLater({ action() }, ModalityState.any())
+    }
   }
 }

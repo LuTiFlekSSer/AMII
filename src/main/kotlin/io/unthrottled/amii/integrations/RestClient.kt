@@ -1,6 +1,5 @@
 package io.unthrottled.amii.integrations
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.io.HttpRequests
 import io.unthrottled.amii.integrations.RestTools.performRequest
@@ -11,23 +10,23 @@ import io.unthrottled.amii.tools.runSafelyWithResult
 import io.unthrottled.amii.tools.toOptional
 import java.io.InputStream
 import java.util.Optional
-import java.util.concurrent.Callable
+
+internal object NetworkTimeouts {
+  const val CONNECT_MS = 10_000
+  const val READ_MS = 30_000
+}
 
 object RestClient : Logging {
 
   fun performGet(url: String): Optional<String> =
-    ApplicationManager.getApplication().executeOnPooledThread(
-      Callable {
-        runSafelyWithResult({
-          performRequest(url) { responseBody ->
-            String(responseBody.readAllTheBytes())
-          }
-        }) {
-          logger().warn("Unable to complete request for $url for raisins.", it)
-          Optional.empty()
-        }
+    runSafelyWithResult({
+      performRequest(url) { responseBody ->
+        String(responseBody.readAllTheBytes())
       }
-    ).get()
+    }) {
+      logger().warn("Unable to complete request for $url for raisins.", it)
+      Optional.empty()
+    }
 }
 
 object RestTools {
@@ -40,6 +39,8 @@ object RestTools {
     log.info("Attempting to download remote asset: $url")
     return runSafelyWithResult({
       HttpRequests.request(url)
+        .connectTimeout(NetworkTimeouts.CONNECT_MS)
+        .readTimeout(NetworkTimeouts.READ_MS)
         .connect { request ->
           runSafelyWithResult({
             val body = bodyExtractor(request.inputStream)

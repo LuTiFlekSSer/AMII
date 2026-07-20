@@ -113,8 +113,7 @@ class MemeCategoriesSet :
     )
     val menu = MyListPopup(step)
 
-    decorator.actionsPanel?.getAnActionButton(Buttons.ADD)
-      ?.preferredPopupPoint?.let(menu::show)
+    menu.showInCenterOf(this)
 
     return null
   }

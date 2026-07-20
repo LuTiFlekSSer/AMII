@@ -22,6 +22,22 @@ abstract class APIContentManager<T : AssetRepresentation>(
 
   init {
     val apiPath = "assets/${assetCategory.category}"
+    LifeCycleManager.registerAPIAssetUpdateListener(object : APIAssetListener {
+      override fun onDownload(apiPath: String) {
+        refreshCachedDefinitions(apiPath)
+      }
+
+      override fun onUpdate(apiPath: String) {
+        refreshCachedDefinitions(apiPath)
+      }
+
+      private fun refreshCachedDefinitions(updatedPath: String) {
+        if (updatedPath.substringBefore('?') != apiPath) return
+        ExecutionService.executeAsynchronously {
+          cachedInitialization(apiPath)
+        }
+      }
+    })
     cachedInitialization(apiPath)
     LifeCycleManager.registerAssetUpdateListener(object : UpdateAssetsListener {
       override fun onRequestedUpdate() {
@@ -34,7 +50,9 @@ abstract class APIContentManager<T : AssetRepresentation>(
       }
 
       override fun onRequestedBackgroundUpdate() {
-        cachedInitialization(apiPath)
+        ExecutionService.executeAsynchronously {
+          cachedInitialization(apiPath)
+        }
       }
     })
   }

@@ -21,6 +21,13 @@ object VisualAssetDefinitionService : Logging {
         fetchRemoteAsset(memeAssetCategory)
       }
 
+  /** Returns a locally cached asset without scheduling or performing a download. */
+  fun getRandomCachedAssetByCategory(
+    memeAssetCategory: MemeAssetCategory
+  ): Optional<VisualMemeContent> =
+    chooseAssetAtRandom(getLocalAssetsByCategory(memeAssetCategory))
+      .flatMap { assetManager.resolveCachedAsset(it.representation) }
+
   private fun resolveAsset(
     memeAssetCategory: MemeAssetCategory,
     entity: VisualAssetEntity

@@ -7,6 +7,8 @@ interface MemePlayer {
 
   val duration: Long
 
+  fun prepare() {}
+
   fun play()
 
   fun stop()

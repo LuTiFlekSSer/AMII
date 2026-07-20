@@ -6,18 +6,17 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.application.ApplicationInfo
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.util.Urls
 import com.intellij.util.io.HttpRequests
 import io.unthrottled.amii.config.Constants
+import io.unthrottled.amii.integrations.NetworkTimeouts
 import io.unthrottled.amii.tools.Logging
 import io.unthrottled.amii.tools.logger
 import io.unthrottled.amii.tools.runSafelyWithResult
 import io.unthrottled.amii.tools.toOptional
 import java.util.Collections
-import java.util.concurrent.Callable
 
 object PluginService : Logging {
 
@@ -49,20 +48,16 @@ object PluginService : Logging {
     canExtensionBeInstalled(Constants.ANDROID_EXTENSION_ID)
 
   private fun canExtensionBeInstalled(pluginIdString: String) =
-    ApplicationManager.getApplication().executeOnPooledThread(
-      Callable {
-        val pluginId = PluginId.getId(pluginIdString)
-        runSafelyWithResult({
-          getLastCompatiblePluginUpdate(
-            Collections.singleton(pluginId)
-          ).firstOrNull { pluginNode ->
-            pluginNode.pluginId == pluginIdString
-          } != null
-        }) {
-          false
-        }
-      }
-    ).get()
+    runSafelyWithResult({
+      val pluginId = PluginId.getId(pluginIdString)
+      getLastCompatiblePluginUpdate(
+        Collections.singleton(pluginId)
+      ).firstOrNull { pluginNode ->
+        pluginNode.pluginId == pluginIdString
+      } != null
+    }) {
+      false
+    }
 
   private data class CompatibleUpdateRequest(
     val build: String,
@@ -102,6 +97,8 @@ object PluginService : Logging {
       )
       HttpRequests
         .post(Urls.newFromEncoded(COMPATIBLE_UPDATE_URL).toExternalForm(), HttpRequests.JSON_CONTENT_TYPE)
+        .connectTimeout(NetworkTimeouts.CONNECT_MS)
+        .readTimeout(NetworkTimeouts.READ_MS)
         .productNameAsUserAgent()
         .throwStatusCodeException(false)
         .connect {

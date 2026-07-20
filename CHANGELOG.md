@@ -2,6 +2,25 @@
 
 # AMII Changelog
 
+## [1.7.0]
+
+### Added
+
+- IntelliJ Platform 2026.1 and 2026.2 build support.
+- Local-platform builds via `AMII_IDE_PATH`, so Gradle can use an already installed JetBrains IDE.
+
+### Fixed
+
+- Intermittent IDE startup freeze before the first greeting image.
+- Network calls without explicit connection and read timeouts.
+- Stale asset checks being recorded as successful before a download completed.
+- Partial metadata, image, and audio cache files after interrupted downloads.
+- Swing components being created or mutated from pooled threads.
+- Asset-index initialization races and blocking audio/GIF work on the UI thread.
+- Modular platform dependencies being interpreted as missing installable plugins.
+- Freshly downloaded assets being removed by a stale, path-separator-sensitive orphan scan.
+- Network access while constructing the settings UI and overflow in large idle/silence timeouts.
+
 ## [1.5.0]
 
 ### Added

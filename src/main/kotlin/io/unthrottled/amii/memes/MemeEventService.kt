@@ -1,5 +1,7 @@
 package io.unthrottled.amii.memes
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import io.unthrottled.amii.assets.MemeAsset
 import io.unthrottled.amii.assets.MemeAssetCategory
@@ -17,9 +19,10 @@ fun Project.memeEventService(): MemeEventService = this.getService(MemeEventServ
 class MemeEventService(private val project: Project) {
 
   fun displayLastMemeEvent() {
-    val memeToShow = previousMemeEvent ?: return
-
-    displayMemeEvent(memeToShow.clone())
+    runOnUiThread {
+      val memeToShow = previousMemeEvent ?: return@runOnUiThread
+      displayMemeEvent(memeToShow.clone())
+    }
   }
 
   fun createAndDisplayMemeEventFromCategory(
@@ -44,22 +47,40 @@ class MemeEventService(private val project: Project) {
     memeSupplier: () -> Optional<MemeAsset>
   ) {
     ExecutionService.executeAsynchronously {
-      memeSupplier().flatMap { memeAssets ->
-        project.memeFactory()
-          .getMemeBuilderForAsset(
-            memeAssets
-          )
-      }.map { memeBuilder ->
-        memeDecorator(memeBuilder)
-      }.doOrElse({
-        attemptToDisplayMeme(it)
-      }) {
-        UpdateNotification.sendMessage(
-          PluginMessageBundle.message("notification.no-memes.title", userEvent.eventName),
-          PluginMessageBundle.message("notification.no-memes.body"),
-          project
-        )
+      val suppliedMeme = memeSupplier().map { memeAsset ->
+        memeAsset to MemePanel.calculateCappedDimensions(memeAsset.visualMemeContent)
       }
+      runOnUiThread {
+        suppliedMeme.flatMap { (memeAsset, cappedDimensions) ->
+          project.memeFactory()
+            .getMemeBuilderForAsset(
+              memeAsset,
+              cappedDimensions
+            )
+        }.map { memeBuilder ->
+          memeDecorator(memeBuilder)
+        }.doOrElse({
+          attemptToDisplayMeme(it)
+        }) {
+          UpdateNotification.sendMessage(
+            PluginMessageBundle.message("notification.no-memes.title", userEvent.eventName),
+            PluginMessageBundle.message("notification.no-memes.body"),
+            project
+          )
+        }
+      }
+    }
+  }
+
+  private fun runOnUiThread(action: () -> Unit) {
+    val application = ApplicationManager.getApplication()
+    val guardedAction = {
+      if (project.isDisposed.not()) action()
+    }
+    if (application.isDispatchThread) {
+      guardedAction()
+    } else {
+      application.invokeLater({ guardedAction() }, ModalityState.any())
     }
   }
 

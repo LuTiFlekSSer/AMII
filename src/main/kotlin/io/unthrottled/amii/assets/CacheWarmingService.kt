@@ -1,15 +1,27 @@
 package io.unthrottled.amii.assets
 
-import com.intellij.ide.IdeEventQueue
+import com.intellij.ide.IdleTracker
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
 import io.unthrottled.amii.config.Config
 import io.unthrottled.amii.platform.UpdateAssetsListener
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.minutes
 
-class CacheWarmingService : Disposable, Runnable {
+@OptIn(FlowPreview::class)
+class CacheWarmingService(
+  private val coroutineScope: CoroutineScope
+) : Disposable, Runnable {
 
   companion object {
     val instance: CacheWarmingService
@@ -18,14 +30,12 @@ class CacheWarmingService : Disposable, Runnable {
 
   private var dateRequested = Instant.EPOCH
 
-  init {
-    IdeEventQueue.getInstance().addIdleListener(
-      this,
-      TimeUnit.MILLISECONDS.convert(
-        Config.DEFAULT_IDLE_TIMEOUT_IN_MINUTES,
-        TimeUnit.MINUTES
-      ).toInt()
-    )
+  private val idleListenerJob = coroutineScope.launch(CoroutineName("AMII cache warming idle listener")) {
+    IdleTracker.getInstance().events
+      .debounce(Config.DEFAULT_IDLE_TIMEOUT_IN_MINUTES.minutes)
+      .collect {
+        withContext(Dispatchers.EDT) { run() }
+      }
   }
 
   fun init() {
@@ -33,7 +43,7 @@ class CacheWarmingService : Disposable, Runnable {
   }
 
   override fun dispose() {
-    IdeEventQueue.getInstance().removeIdleListener(this)
+    idleListenerJob.cancel()
   }
 
   override fun run() {

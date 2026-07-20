@@ -13,7 +13,6 @@ import io.unthrottled.amii.events.UserEventCategory
 import io.unthrottled.amii.events.UserEventListener
 import io.unthrottled.amii.events.UserEvents
 import io.unthrottled.amii.tools.PluginMessageBundle
-import java.util.concurrent.TimeUnit
 
 class SilenceListener(private val project: Project) : Runnable, UserEventListener, Disposable {
   private val messageBus = ApplicationManager.getApplication().messageBus.connect()
@@ -30,10 +29,7 @@ class SilenceListener(private val project: Project) : Runnable, UserEventListene
         silenceAlarm.cancelAllRequests()
         silenceAlarm.addRequest(
           self,
-          TimeUnit.MILLISECONDS.convert(
-            newPluginState.silenceTimeoutInMinutes,
-            TimeUnit.MINUTES
-          ).toInt()
+          minutesToAlarmDelayMillis(newPluginState.silenceTimeoutInMinutes)
         )
       }
     )
@@ -43,10 +39,7 @@ class SilenceListener(private val project: Project) : Runnable, UserEventListene
   private fun scheduleSilenceAlert() {
     silenceAlarm.addRequest(
       this,
-      TimeUnit.MILLISECONDS.convert(
-        getCurrentTimoutInMinutes(),
-        TimeUnit.MINUTES
-      ).toInt()
+      minutesToAlarmDelayMillis(getCurrentTimoutInMinutes())
     )
   }
 

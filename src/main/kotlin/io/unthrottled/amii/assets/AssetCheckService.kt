@@ -4,6 +4,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import com.intellij.openapi.diagnostic.Logger
 import io.unthrottled.amii.tools.toOptional
+import io.unthrottled.amii.tools.writeAtomically
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,18 +37,23 @@ object AssetCheckService {
 
   fun getCheckedDate(localInstallPath: Path) = assetChecks[getAssetCheckKey(localInstallPath)]
 
+  @Synchronized
   fun writeCheckedDate(localInstallPath: Path) {
-    assetChecks[getAssetCheckKey(localInstallPath)] = Instant.now()
+    val updatedChecks = ConcurrentHashMap(assetChecks)
+    updatedChecks[getAssetCheckKey(localInstallPath)] = Instant.now()
     val assetCheckPath = getAssetChecksFile()
     LocalStorageService.createDirectories(assetCheckPath)
-    Files.newBufferedWriter(
-      assetCheckPath,
-      Charset.defaultCharset(),
-      StandardOpenOption.CREATE,
-      StandardOpenOption.TRUNCATE_EXISTING
-    ).use { writer ->
-      writer.write(gson.toJson(assetChecks))
+    writeAtomically(assetCheckPath) { temporaryFile ->
+      Files.newBufferedWriter(
+        temporaryFile,
+        Charset.defaultCharset(),
+        StandardOpenOption.TRUNCATE_EXISTING
+      ).use { writer ->
+        writer.write(gson.toJson(updatedChecks))
+      }
     }
+    assetChecks.clear()
+    assetChecks.putAll(updatedChecks)
   }
 
   private fun getAssetChecksFile() =

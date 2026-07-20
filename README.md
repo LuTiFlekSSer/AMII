@@ -30,6 +30,16 @@ waifu, husbando, and/or favorite character(s)!<br/><br/>
   Download the [latest release](https://github.com/ani-memes/AMII/releases/latest) and install it manually using
   <kbd>Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
 
+- Build this fork against an IDE already installed on the machine (no IDE distribution is downloaded):
+
+  ```powershell
+  $env:AMII_IDE_PATH = "$env:LOCALAPPDATA\Programs\PyCharm Professional"
+  .\gradlew.bat buildPlugin
+  ```
+
+  If the IDE is installed elsewhere, set `AMII_IDE_PATH` to that directory. The installable ZIP is written to
+  `build/distributions/`.
+
 ---
 
 # Documentation

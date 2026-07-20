@@ -4,7 +4,6 @@ import com.intellij.ide.ui.LafManagerListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.WindowManager
@@ -60,9 +59,11 @@ class MoodStatusBarWidget(private val project: Project) :
         }
       }
     )
-    StartupManager.getInstance(project).runWhenProjectIsInitialized {
-      project.messageBus.syncPublisher(EMOTION_TOPIC).onRequestMood()
-      updateWidget()
+    ApplicationManager.getApplication().invokeLater {
+      if (!project.isDisposed) {
+        project.messageBus.syncPublisher(EMOTION_TOPIC).onRequestMood()
+        updateWidget()
+      }
     }
   }
 

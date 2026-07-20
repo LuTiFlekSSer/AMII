@@ -2,9 +2,9 @@ package io.unthrottled.amii.assets
 
 import io.unthrottled.amii.assets.AssetCheckService.getCheckedDate
 import io.unthrottled.amii.assets.AssetCheckService.hasBeenCheckedToday
-import io.unthrottled.amii.assets.AssetCheckService.writeCheckedDate
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 
 enum class AssetStatus {
   NOT_DOWNLOADED, STALE, CURRENT
@@ -16,6 +16,8 @@ data class AssetCheckPayload(
 )
 
 object LocalContentService {
+  private val LEGACY_FALSE_SUCCESS_TOLERANCE = Duration.ofMinutes(5)
+
   fun hasAssetChanged(
     localInstallPath: Path
   ): Boolean =
@@ -23,17 +25,31 @@ object LocalContentService {
 
   fun hasAPIAssetChanged(
     localInstallPath: Path
-  ): AssetCheckPayload =
-    when {
-      !Files.exists(localInstallPath) -> AssetCheckPayload(AssetStatus.NOT_DOWNLOADED)
+  ): AssetCheckPayload {
+    if (!Files.exists(localInstallPath)) {
+      return AssetCheckPayload(AssetStatus.NOT_DOWNLOADED)
+    }
+
+    val checkedDate = getCheckedDate(localInstallPath)
+    val fileModifiedDate = runCatching {
+      Files.getLastModifiedTime(localInstallPath).toInstant()
+    }.getOrNull()
+    val hasLegacyFalseSuccessTimestamp = checkedDate != null &&
+      fileModifiedDate != null &&
+      checkedDate.isAfter(fileModifiedDate.plus(LEGACY_FALSE_SUCCESS_TOLERANCE))
+
+    return when {
+      hasLegacyFalseSuccessTimestamp -> AssetCheckPayload(
+        AssetStatus.STALE,
+        metaData = null
+      )
       !hasBeenCheckedToday(localInstallPath) -> {
-        val metaData = getCheckedDate(localInstallPath)
-        writeCheckedDate(localInstallPath)
         AssetCheckPayload(
           AssetStatus.STALE,
-          metaData
+          checkedDate
         )
       }
       else -> AssetCheckPayload(AssetStatus.CURRENT)
     }
+  }
 }

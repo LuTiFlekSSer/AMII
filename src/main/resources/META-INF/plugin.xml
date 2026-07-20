@@ -2,7 +2,7 @@
   <id>io.unthrottled.amii</id>
   <name>Anime Memes</name>
   <vendor>Unthrottled</vendor>
-  <idea-version since-build="251"/>
+  <idea-version since-build="261"/>
   <description>
     Give your IDE more personality and have &lt;emphasis&gt;more&lt;/emphasis&gt; fun programming with the Anime Meme IDE
     Integration! (AMII)&lt;br/&gt;&lt;br/&gt;
@@ -15,6 +15,11 @@
   <!-- Product and plugin compatibility requirements -->
   <!-- https://www.jetbrains.org/intellij/sdk/docs/basics/getting_started/plugin_compatibility.html -->
   <depends>com.intellij.modules.platform</depends>
+  <dependencies>
+    <module name="intellij.platform.tasks"/>
+    <module name="intellij.platform.smRunner"/>
+  </dependencies>
+  <depends>com.intellij.modules.jcef</depends>
   <depends optional="true" config-file="io.unthrottled.amii-com.intellij.modules.rider.xml">com.intellij.modules.rider</depends>
   <depends optional="true" config-file="io.unthrottled.amii-com.intellij.modules.androidstudio.xml">com.intellij.modules.androidstudio</depends>
   <depends optional="true" config-file="io.unthrottled.amii-io.unthrottled.doki.theme.xml">io.acari.DDLCTheme</depends>

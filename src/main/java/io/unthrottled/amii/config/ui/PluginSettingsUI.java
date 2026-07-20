@@ -2,6 +2,7 @@ package io.unthrottled.amii.config.ui;
 
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.DumbAware;
@@ -21,13 +22,13 @@ import io.unthrottled.amii.assets.Gender;
 import io.unthrottled.amii.assets.MemeAssetCategory;
 import io.unthrottled.amii.assets.VisualAssetDefinitionService;
 import io.unthrottled.amii.assets.VisualEntityRepository;
-import io.unthrottled.amii.assets.VisualMemeContent;
 import io.unthrottled.amii.config.Config;
 import io.unthrottled.amii.config.ConfigListener;
 import io.unthrottled.amii.config.ConfigSettingsModel;
 import io.unthrottled.amii.config.PluginSettings;
 import io.unthrottled.amii.memes.MemeFactory;
 import io.unthrottled.amii.memes.MemeMetadata;
+import io.unthrottled.amii.memes.MemePanel;
 import io.unthrottled.amii.memes.MemeService;
 import io.unthrottled.amii.memes.PanelDismissalOptions;
 import io.unthrottled.amii.services.CharacterGatekeeper;
@@ -53,11 +54,8 @@ import javax.swing.event.DocumentListener;
 import javax.swing.event.HyperlinkEvent;
 import java.awt.Dimension;
 import java.awt.event.ActionListener;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -70,7 +68,6 @@ import static io.unthrottled.amii.events.UserEvents.TASK;
 import static io.unthrottled.amii.events.UserEvents.TEST;
 import static io.unthrottled.amii.memes.PanelDismissalOptions.FOCUS_LOSS;
 import static io.unthrottled.amii.memes.PanelDismissalOptions.TIMED;
-import static io.unthrottled.amii.tools.AssetTools.getDimensionCappingStyle;
 import static java.util.Optional.ofNullable;
 
 public class PluginSettingsUI implements SearchableConfigurable, Configurable.NoScroll, DumbAware {
@@ -157,21 +154,26 @@ public class PluginSettingsUI implements SearchableConfigurable, Configurable.No
 
     VisualEntityRepository.Companion.getInstance().refreshLocalAssets();
     customMemeListModel = new CustomMemeList(
-      memeContent ->
-        Arrays.stream(ProjectManager.getInstance().getOpenProjects())
-          .forEach(project ->
-            project.getService(MemeFactory.class)
-              .getMemeBuilderForAsset(memeContent)
-              .ifPresent(meme -> project.getService(MemeService.class)
-                .displayMeme(
-                  meme.withDismissalMode(TIMED)
-                    .withMetaData(Map.of(
-                      MemeMetadata.RUN_ON_NON_UI_THREAD.name(), true
-                    ))
-                    .build()
+      memeContent -> ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        Dimension cappedDimensions = MemePanel.calculateCappedDimensions(memeContent.getVisualMemeContent());
+        ApplicationManager.getApplication().invokeLater(
+          () -> Arrays.stream(ProjectManager.getInstance().getOpenProjects())
+            .forEach(project ->
+              project.getService(MemeFactory.class)
+                .getMemeBuilderForAsset(memeContent, cappedDimensions)
+                .ifPresent(meme -> project.getService(MemeService.class)
+                  .displayMeme(
+                    meme.withDismissalMode(TIMED)
+                      .withMetaData(Map.of(
+                        MemeMetadata.RUN_ON_NON_UI_THREAD.name(), true
+                      ))
+                      .build()
+                  )
                 )
-              )
-          ),
+            ),
+          ModalityState.any()
+        );
+      }),
       pluginSettingsModel
     );
     customMemeListPanel = customMemeListModel.getComponent();
@@ -317,26 +319,10 @@ public class PluginSettingsUI implements SearchableConfigurable, Configurable.No
   private String getSettingsAniMeme() {
     if (Config.getInstance().getDiscreetMode()) return "";
 
-    String asset = VisualAssetDefinitionService.INSTANCE
-      .getRandomAssetByCategory(MemeAssetCategory.HAPPY)
-      .map(VisualMemeContent::getFilePath)
-      .map(URI::toString)
-      .orElse("https://waifu.assets.unthrottled.io/visuals/smug/smug_kurumi_ebisuzawa.gif");
-    String extraStyles =
-      getFilePath(asset)
-        .map(fileUrl -> getDimensionCappingStyle(fileUrl, new Dimension(100, 100)))
-        .orElse("");
-    String aniMeme = "<img src='" + asset + "' " + extraStyles + "/>\n";
-    return aniMeme;
-  }
-
-  @NotNull
-  private Optional<URI> getFilePath(String asset) {
-    try {
-      return Optional.of(new URI(asset));
-    } catch (URISyntaxException e) {
-      return Optional.empty();
-    }
+    return VisualAssetDefinitionService.INSTANCE
+      .getRandomCachedAssetByCategory(MemeAssetCategory.HAPPY)
+      .map(asset -> "<img src='" + asset.getFilePath() + "' width='100' height='100'/>\n")
+      .orElse("");
   }
 
   @Override

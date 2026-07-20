@@ -1,18 +1,30 @@
 package io.unthrottled.amii.assets
 
-import com.intellij.ide.IdeEventQueue
+import com.intellij.ide.IdleTracker
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
 import io.unthrottled.amii.config.Config
 import io.unthrottled.amii.memes.MemeDisplayListener
 import io.unthrottled.amii.tools.ProbabilityTools
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Optional
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.minutes
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.random.Random
 
-class VisualAssetProbabilityService : Disposable, MemeDisplayListener, Runnable {
+@OptIn(FlowPreview::class)
+class VisualAssetProbabilityService(
+  private val coroutineScope: CoroutineScope
+) : Disposable, MemeDisplayListener, Runnable {
 
   companion object {
     val instance: VisualAssetProbabilityService
@@ -21,23 +33,28 @@ class VisualAssetProbabilityService : Disposable, MemeDisplayListener, Runnable 
 
   private val messageBusConnection = ApplicationManager.getApplication().messageBus.connect()
 
-  init {
-    messageBusConnection.subscribe(MemeDisplayListener.TOPIC, this)
-    IdeEventQueue.getInstance().addIdleListener(
-      this,
-      TimeUnit.MILLISECONDS.convert(
-        Config.instance.idleTimeoutInMinutes,
-        TimeUnit.MINUTES
-      ).toInt()
-    )
-  }
-
   private val seenAssetLedger = AssetObservationService.getInitialItem()
 
   private val random = java.util.Random()
   private val probabilityTools = ProbabilityTools(
     Random(System.currentTimeMillis())
   )
+
+  private val idleListenerJob = coroutineScope.launch(CoroutineName("AMII asset ledger idle listener")) {
+    IdleTracker.getInstance().events
+      .debounce(
+        Config.instance.idleTimeoutInMinutes
+          .coerceIn(1L, Int.MAX_VALUE.toLong())
+          .minutes
+      )
+      .collect {
+        withContext(Dispatchers.EDT) { run() }
+      }
+  }
+
+  init {
+    messageBusConnection.subscribe(MemeDisplayListener.TOPIC, this)
+  }
 
   fun pickAssetFromList(visualMemes: Collection<VisualAssetEntity>): Optional<VisualAssetEntity> {
     val seenTimes = visualMemes.map { getSeenCount(it) }
@@ -84,7 +101,7 @@ class VisualAssetProbabilityService : Disposable, MemeDisplayListener, Runnable 
   override fun dispose() {
     messageBusConnection.dispose()
     AssetObservationService.persistLedger(seenAssetLedger)
-    IdeEventQueue.getInstance().removeIdleListener(this)
+    idleListenerJob.cancel()
   }
 
   override fun onDisplay(visualMemeId: String) {

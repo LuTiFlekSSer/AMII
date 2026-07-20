@@ -1,7 +1,6 @@
 package io.unthrottled.amii.integrations
 
 import com.google.gson.GsonBuilder
-import com.intellij.ide.IdeBundle
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ApplicationNamesInfo
@@ -9,10 +8,8 @@ import com.intellij.openapi.diagnostic.ErrorReportSubmitter
 import com.intellij.openapi.diagnostic.IdeaLoggingEvent
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.SubmittedReportInfo
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.util.Consumer
-import com.intellij.util.text.DateFormatUtil
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
@@ -95,7 +92,14 @@ class ErrorReporter : ErrorReportSubmitter() {
       setExtra("Build Info", getBuildInfo(appInfo))
       setExtra("JRE", getJRE(properties))
       setExtra("VM", getVM(properties))
-      setExtra("System Info", SystemInfo.getOsNameAndVersion())
+      setExtra(
+        "System Info",
+        listOf(
+          properties.getProperty("os.name", "unknown"),
+          properties.getProperty("os.version", ""),
+          properties.getProperty("os.arch", "")
+        ).filter(String::isNotBlank).joinToString(" ")
+      )
       setExtra("GC", getGC())
       setExtra("Memory", Runtime.getRuntime().maxMemory() / FileUtilRt.MEGABYTE)
       setExtra("Cores", Runtime.getRuntime().availableProcessors())
@@ -109,28 +113,26 @@ class ErrorReporter : ErrorReportSubmitter() {
       properties.getProperty("java.version", "unknown")
     )
     val arch = properties.getProperty("os.arch", "")
-    return IdeBundle.message("about.box.jre", javaVersion, arch)
+    return listOf(javaVersion, arch).filter(String::isNotBlank).joinToString(" ")
   }
 
   private fun getVM(properties: Properties): String {
     val vmVersion = properties.getProperty("java.vm.name", "unknown")
     val vmVendor = properties.getProperty("java.vendor", "unknown")
-    return IdeBundle.message("about.box.vm", vmVersion, vmVendor)
+    return "$vmVersion ($vmVendor)"
   }
 
   private fun getGC() = ManagementFactory.getGarbageCollectorMXBeans().stream()
     .map { it.name }.collect(Collectors.joining(","))
 
   private fun getBuildInfo(appInfo: ApplicationInfo): String {
-    var buildInfo = IdeBundle.message("about.box.build.number", appInfo.build.asString())
     val cal = appInfo.buildDate
-    var buildDate = ""
-    if (appInfo.build.isSnapshot) {
-      buildDate = SimpleDateFormat("HH:mm, ").format(cal.time)
+    val dateFormat = if (appInfo.build.isSnapshot) {
+      SimpleDateFormat("yyyy-MM-dd HH:mm")
+    } else {
+      SimpleDateFormat("yyyy-MM-dd")
     }
-    buildDate += DateFormatUtil.formatAboutDialogDate(cal.time)
-    buildInfo += IdeBundle.message("about.box.build.date", buildDate)
-    return buildInfo
+    return "${appInfo.build.asString()} (${dateFormat.format(cal.time)})"
   }
 
   private fun getAppName(): Pair<ApplicationInfo, String> {

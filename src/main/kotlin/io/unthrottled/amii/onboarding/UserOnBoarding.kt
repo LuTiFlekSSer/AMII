@@ -1,50 +1,42 @@
 package io.unthrottled.amii.onboarding
 
-import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupManager
 import io.unthrottled.amii.config.Config
-import io.unthrottled.amii.config.Constants.PLUGIN_ID
-import io.unthrottled.amii.platform.UpdateAssetsListener
 import io.unthrottled.amii.promotion.PromotionManager
+import io.unthrottled.amii.services.backgroundTasks
 import io.unthrottled.amii.tools.toOptional
 import java.util.Optional
 import java.util.UUID
 
 object UserOnBoarding {
 
-  fun attemptToPerformNewUpdateActions(project: Project) {
-    getNewVersion().ifPresent { newVersion ->
+  fun attemptToPerformNewUpdateActions(project: Project): Boolean {
+    val installedVersion = getVersion()
+    val updatedVersion = installedVersion.filter { it != Config.instance.version }
+    updatedVersion.ifPresent { newVersion ->
       Config.instance.version = newVersion
-      ApplicationManager.getApplication().messageBus
-        .syncPublisher(UpdateAssetsListener.TOPIC)
-        .onRequestedUpdate()
-      StartupManager.getInstance(project)
-        .runWhenProjectIsInitialized {
-          UpdateNotification.display(project, newVersion)
-        }
+      UpdateNotification.display(project, newVersion)
     }
 
     val isNewUser = Config.instance.userId.isEmpty()
-    StartupManager.getInstance(project).runWhenProjectIsInitialized {
-      getVersion().ifPresent { version ->
+    if (isNewUser) {
+      Config.instance.userId = UUID.randomUUID().toString()
+    }
+
+    installedVersion.ifPresent { version ->
+      project.backgroundTasks().launch("AMII plugin promotion check") {
         PromotionManager.registerPromotion(version, isNewUser = isNewUser)
       }
     }
 
-    if (isNewUser) {
-      Config.instance.userId = UUID.randomUUID().toString()
-    }
+    return updatedVersion.isPresent
   }
 
-  private fun getNewVersion() =
-    getVersion()
-      .filter { it != Config.instance.version }
-
   fun getVersion(): Optional<String> =
-    PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))
+    UserOnBoarding::class.java.getResourceAsStream("/amii-version.txt")
       .toOptional()
-      .map { it.version }
+      .map { versionStream ->
+        versionStream.bufferedReader().use { it.readText().trim() }
+      }
+      .filter(String::isNotEmpty)
 }

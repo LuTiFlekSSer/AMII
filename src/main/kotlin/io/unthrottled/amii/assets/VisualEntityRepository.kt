@@ -6,7 +6,9 @@ import io.unthrottled.amii.actions.SyncedAssetsListener
 import io.unthrottled.amii.assets.LocalVisualContentManager.updateRepresentation
 import io.unthrottled.amii.platform.LifeCycleManager
 import io.unthrottled.amii.platform.UpdateAssetsListener
+import io.unthrottled.amii.services.ExecutionService
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 class VisualEntityRepository : Disposable {
   companion object {
@@ -19,65 +21,47 @@ class VisualEntityRepository : Disposable {
     private const val ALL_SYNCED = ANIME_SYNC or CHARACTER_SYNC or VISUAL_SYNC
   }
 
-  private var syncedAssets = 0
+  private data class RemoteIndices(
+    val visualAssets: Map<String, VisualAssetEntity>,
+    val anime: Map<String, AnimeEntity>,
+    val characters: Map<String, CharacterEntity>
+  )
 
+  // Initialize every manager and index before subscribing to their synchronous
+  // update events. This avoids re-entering partially initialized Kotlin objects.
+  @Volatile
+  private var remoteIndices = createRemoteIndices()
+
+  @Volatile
+  private var localVisualAssetEntities: MutableMap<String, VisualAssetEntity> = createLocalVisualIndex()
+
+  private val syncLock = Any()
+  private var syncedAssets = 0
+  private val indexRefreshPending = AtomicBoolean(false)
+  private val indexRefreshRunning = AtomicBoolean(false)
   private val messageBusConnection = ApplicationManager.getApplication().messageBus.connect()
 
   init {
     LifeCycleManager.registerAssetUpdateListener(
       object : UpdateAssetsListener {
         override fun onRequestedUpdate() {
-          syncedAssets = 0
+          resetSyncedAssets()
         }
 
         override fun onRequestedBackgroundUpdate() {
-          syncedAssets = 0
+          resetSyncedAssets()
         }
       }
     )
 
-    // there is a bit of a circular dependency between
-    // the <code>VisualContentManager</code> and this
-    // class, so we'll just register the update listener
-    // after all the services initialize.
-    ApplicationManager.getApplication().invokeLater {
-      messageBusConnection
-        .subscribe(
-          ContentManagerListener.TOPIC,
-          ContentManagerListener {
-            syncedAssets = syncedAssets or when (it) {
-              AssetCategory.ANIME -> ANIME_SYNC
-              AssetCategory.CHARACTERS -> CHARACTER_SYNC
-              AssetCategory.VISUALS -> VISUAL_SYNC
-              else -> syncedAssets
-            }
-            if (syncedAssets == ALL_SYNCED) {
-              updateIndices()
-              syncedAssets = 0
-              ApplicationManager.getApplication().messageBus.syncPublisher(SyncedAssetsListener.TOPIC)
-                .onSynced()
-            }
-          }
-        )
-    }
-  }
-
-  private var visualAssetEntities: Map<String, VisualAssetEntity>
-  private var localVisualAssetEntities: MutableMap<String, VisualAssetEntity>
-  private var allAnime: Map<String, AnimeEntity>
-  private var characters: Map<String, CharacterEntity>
-
-  init {
-    allAnime = createAnimeIndex()
-    characters = createCharacterIndex()
-    visualAssetEntities = createVisualAssetIndex()
-    localVisualAssetEntities = createLocalVisualIndex()
+    messageBusConnection.subscribe(
+      ContentManagerListener.TOPIC,
+      ContentManagerListener { recordSynchronizedAsset(it) }
+    )
   }
 
   private fun updateIndices() {
-    allAnime = createAnimeIndex()
-    characters = createCharacterIndex()
-    visualAssetEntities = createVisualAssetIndex()
+    remoteIndices = createRemoteIndices()
     refreshLocalAssets()
   }
 
@@ -86,10 +70,10 @@ class VisualEntityRepository : Disposable {
   }
 
   val allCharacters: List<CharacterEntity>
-    get() = characters.entries.map { it.value }
+    get() = remoteIndices.characters.values.toList()
 
   fun findById(assetId: String): VisualAssetEntity? {
-    return visualAssetEntities[assetId] ?: localVisualAssetEntities[assetId]
+    return remoteIndices.visualAssets[assetId] ?: localVisualAssetEntities[assetId]
   }
 
   fun update(visualAssetEntity: VisualAssetEntity) {
@@ -99,21 +83,19 @@ class VisualEntityRepository : Disposable {
     localVisualAssetEntities[visualAssetEntity.id] = visualAssetEntity
   }
 
-  private fun createAnimeIndex() =
-    AnimeContentManager.supplyAssets()
+  private fun createRemoteIndices(): RemoteIndices {
+    val anime = AnimeContentManager.supplyAssets()
       .associate { it.id to it.toEntity() }
-
-  private fun createCharacterIndex() = CharacterContentManager.supplyAssets()
-    .filter { allAnime.containsKey(it.animeId) }
-    .associate { it.id to it.toEntity(allAnime[it.animeId]!!) }
-
-  private fun createVisualAssetIndex(): ConcurrentHashMap<String, VisualAssetEntity> {
-    return ConcurrentHashMap(
+    val characters = CharacterContentManager.supplyAssets()
+      .filter { anime.containsKey(it.animeId) }
+      .associate { it.id to it.toEntity(anime.getValue(it.animeId)) }
+    val visualAssets = ConcurrentHashMap(
       RemoteVisualContentManager.supplyAllAssetDefinitions()
-        .map { visualRepresentation ->
-          visualRepresentation.toEntity(visualRepresentation.char.mapNotNull { characters[it] })
+        .map { representation ->
+          representation.toEntity(representation.char.mapNotNull { characters[it] })
         }.associateBy { it.id }
     )
+    return RemoteIndices(visualAssets, anime, characters)
   }
 
   private fun createLocalVisualIndex(): ConcurrentHashMap<String, VisualAssetEntity> {
@@ -123,6 +105,48 @@ class VisualEntityRepository : Disposable {
           visualRepresentation.fromCustomEntity()
         }.associateBy { it.id }
     )
+  }
+
+  private fun resetSyncedAssets() {
+    synchronized(syncLock) {
+      syncedAssets = 0
+    }
+  }
+
+  private fun recordSynchronizedAsset(assetCategory: AssetCategory) {
+    val allAssetsAreSynchronized = synchronized(syncLock) {
+      syncedAssets = syncedAssets or when (assetCategory) {
+        AssetCategory.ANIME -> ANIME_SYNC
+        AssetCategory.CHARACTERS -> CHARACTER_SYNC
+        AssetCategory.VISUALS -> VISUAL_SYNC
+        else -> 0
+      }
+      if (syncedAssets == ALL_SYNCED) {
+        syncedAssets = 0
+        true
+      } else {
+        false
+      }
+    }
+    if (allAssetsAreSynchronized) scheduleIndexRefresh()
+  }
+
+  private fun scheduleIndexRefresh() {
+    indexRefreshPending.set(true)
+    if (indexRefreshRunning.compareAndSet(false, true).not()) return
+
+    ExecutionService.executeAsynchronously {
+      try {
+        while (indexRefreshPending.getAndSet(false)) {
+          updateIndices()
+          ApplicationManager.getApplication().messageBus.syncPublisher(SyncedAssetsListener.TOPIC)
+            .onSynced()
+        }
+      } finally {
+        indexRefreshRunning.set(false)
+        if (indexRefreshPending.get()) scheduleIndexRefresh()
+      }
+    }
   }
 
   override fun dispose() {

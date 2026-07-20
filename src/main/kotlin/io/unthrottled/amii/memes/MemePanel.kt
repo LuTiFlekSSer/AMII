@@ -30,6 +30,7 @@ import io.unthrottled.amii.memes.DimensionCappingService.getCappingStyle
 import io.unthrottled.amii.memes.PanelDismissalOptions.FOCUS_LOSS
 import io.unthrottled.amii.memes.PanelDismissalOptions.TIMED
 import io.unthrottled.amii.memes.player.MemePlayer
+import io.unthrottled.amii.services.ExecutionService
 import io.unthrottled.amii.services.GifService
 import io.unthrottled.amii.tools.Logging
 import io.unthrottled.amii.tools.registerDelayedRequest
@@ -88,11 +89,12 @@ class MemePanel(
   private val rootPane: JLayeredPane,
   val visualMeme: VisualMemeContent,
   private val memePlayer: MemePlayer?,
+  private val cappedDimensions: Dimension?,
   private val memePanelSettings: MemePanelSettings
 ) : HwFacadeJPanel(), Disposable, Logging {
 
   fun clone(): MemePanel =
-    MemePanel(rootPane, visualMeme, memePlayer, memePanelSettings)
+    MemePanel(rootPane, visualMeme, memePlayer, cappedDimensions, memePanelSettings)
 
   companion object {
     val PANEL_LAYER: Int = JBLayeredPane.DRAG_LAYER
@@ -110,10 +112,29 @@ class MemePanel(
         KeyEvent.VK_CONTROL or
         KeyEvent.VK_ALT or
         KeyEvent.VK_META
+
+    /**
+     * ImageIO-backed dimension discovery must happen before constructing Swing
+     * components. Callers invoke this from a background thread and pass the
+     * result through the builder to the EDT-only panel constructor.
+     */
+    @JvmStatic
+    fun calculateCappedDimensions(visualMeme: VisualMemeContent): Dimension? {
+      val config = Config.instance
+      if (config.capDimensions.not()) return null
+
+      return getCappingStyle(
+        GifService.getDimensions(visualMeme.filePath),
+        Dimension(config.maxMemeWidth, config.maxMemeHeight)
+      )
+    }
   }
 
   private var alpha = 0.0f
   private var overlay: BufferedImage? = null
+
+  @Volatile
+  private var warmedMemeDuration: Int? = null
 
   private var invulnerable = memePanelSettings.invulnerabilityDuration > 0
 
@@ -160,6 +181,8 @@ class MemePanel(
         }
       }
     )
+
+    warmMemeDuration()
   }
 
   @Suppress("ComplexMethod") // cuz I said so.
@@ -310,23 +333,9 @@ class MemePanel(
 
   private fun getFileUrl() = visualMeme.filePath.toString().replace("'", "%27")
 
-  private fun getExtraStyles(): String =
-    if (Config.instance.capDimensions) {
-      val usableDimension = getCappedDimensions()
-      """width='${usableDimension.width}' height='${usableDimension.height}'"""
-    } else {
-      ""
-    }
-
-  private fun getCappedDimensions(): Dimension {
-    val maxHeight = Config.instance.maxMemeHeight
-    val maxWidth = Config.instance.maxMemeWidth
-    val filePath = visualMeme.filePath
-    return getCappingStyle(
-      GifService.getDimensions(filePath),
-      Dimension(maxWidth, maxHeight)
-    )
-  }
+  private fun getExtraStyles(): String = cappedDimensions?.let { usableDimension ->
+    """width='${usableDimension.width}' height='${usableDimension.height}'"""
+  } ?: ""
 
   private fun positionMemePanel(settings: MemePanelSettings, width: Int, height: Int) {
     val (x, y) = getPosition(
@@ -500,21 +509,42 @@ class MemePanel(
   }
 
   private fun getMemeDuration(): Int {
-    val memeDisplayDuration = memePanelSettings.displayDuration * TENTH_OF_A_SECOND_MULTIPLICAND
-    return if (visualMeme.filePath.toString().endsWith(".gif", ignoreCase = true)) {
-      if (memePlayer != null && memePlayer.duration > 0) {
-        memePlayer.duration.toInt()
-      } else {
-        val duration = GifService.getDuration(visualMeme.filePath)
-        if (duration < memeDisplayDuration) {
-          duration * (memeDisplayDuration / max(duration, 1))
-        } else {
-          duration
-        }
+    return warmedMemeDuration ?: configuredDisplayDuration()
+  }
+
+  private fun warmMemeDuration() {
+    if (isGif()) {
+      ExecutionService.executeAsynchronously {
+        memePlayer?.prepare()
+        warmedMemeDuration = calculateMemeDuration()
       }
     } else {
-      memeDisplayDuration
+      warmedMemeDuration = configuredDisplayDuration()
     }
+  }
+
+  private fun calculateMemeDuration(): Int {
+    if (isGif().not()) return configuredDisplayDuration()
+
+    return if (memePlayer != null && memePlayer.duration > 0) {
+      memePlayer.duration.toInt()
+    } else {
+      val duration = GifService.getDuration(visualMeme.filePath)
+      val displayDuration = configuredDisplayDuration()
+      if (duration < displayDuration) {
+        duration * (displayDuration / max(duration, 1))
+      } else {
+        duration
+      }
+    }
+  }
+
+  private fun isGif(): Boolean =
+    visualMeme.filePath.toString().endsWith(".gif", ignoreCase = true)
+
+  private fun configuredDisplayDuration(): Int {
+    val memeDisplayDuration = memePanelSettings.displayDuration * TENTH_OF_A_SECOND_MULTIPLICAND
+    return memeDisplayDuration
   }
 
   override fun dispose() {

@@ -8,8 +8,10 @@ import io.unthrottled.amii.platform.LifeCycleManager
 import io.unthrottled.amii.platform.UpdateAssetsListener
 import io.unthrottled.amii.services.ExecutionService
 import io.unthrottled.amii.tools.doOrElse
+import io.unthrottled.amii.tools.toOptional
 import java.io.InputStream
 import java.net.URI
+import java.nio.file.Files
 import java.util.Optional
 import kotlin.io.path.exists
 
@@ -41,6 +43,22 @@ abstract class RemoteContentManager<T : ContentRepresentation, U : Content>(
 
   init {
     val apiPath = "assets/${assetCategory.category}"
+    LifeCycleManager.registerAPIAssetUpdateListener(object : APIAssetListener {
+      override fun onDownload(apiPath: String) {
+        refreshCachedDefinitions(apiPath)
+      }
+
+      override fun onUpdate(apiPath: String) {
+        refreshCachedDefinitions(apiPath)
+      }
+
+      private fun refreshCachedDefinitions(updatedPath: String) {
+        if (updatedPath.substringBefore('?') != apiPath) return
+        ExecutionService.executeAsynchronously {
+          cachedInitialization(apiPath)
+        }
+      }
+    })
     cachedInitialization(apiPath)
     LifeCycleManager.registerAssetUpdateListener(object : UpdateAssetsListener {
       override fun onRequestedUpdate() {
@@ -53,7 +71,9 @@ abstract class RemoteContentManager<T : ContentRepresentation, U : Content>(
       }
 
       override fun onRequestedBackgroundUpdate() {
-        cachedInitialization(apiPath)
+        ExecutionService.executeAsynchronously {
+          cachedInitialization(apiPath)
+        }
       }
     })
   }
@@ -108,6 +128,19 @@ abstract class RemoteContentManager<T : ContentRepresentation, U : Content>(
         localAssets.add(asset)
         convertToAsset(asset, assetUrl)
       }
+
+  /** Resolves only an already downloaded asset and never performs network I/O. */
+  fun resolveCachedAsset(asset: T): Optional<U> {
+    val localAssetPath = constructLocalContentPath(assetCategory, asset.path)
+    if (Files.isRegularFile(localAssetPath).not()) return Optional.empty()
+
+    return runCatching {
+      localAssets.add(asset)
+      convertToAsset(asset, localAssetPath.toUri())
+    }.onFailure {
+      log.warn("Unable to resolve cached asset $localAssetPath", it)
+    }.getOrNull().toOptional()
+  }
 
   private fun initializeRemoteAssets(assetUrl: URI): Optional<List<T>> =
     try {

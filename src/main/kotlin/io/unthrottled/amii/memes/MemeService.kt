@@ -1,5 +1,7 @@
 package io.unthrottled.amii.memes
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import io.unthrottled.amii.tools.getRootPane
 import io.unthrottled.amii.tools.toOptional
@@ -13,30 +15,46 @@ class MemeService(private val project: Project) {
   }
 
   fun displayMeme(meme: Meme) {
-    // be paranoid about existing memes
-    // hanging around for some reason https://github.com/ani-memes/AMII/issues/108
-    project.getRootPane().toOptional().ifPresent { dismissAllMemesInPane(it) }
+    runOnUiThread {
+      // be paranoid about existing memes
+      // hanging around for some reason https://github.com/ani-memes/AMII/issues/108
+      project.getRootPane().toOptional().ifPresent { dismissAllMemesInPane(it) }
 
-    showMeme(meme)
+      showMeme(meme)
+    }
   }
 
   fun clearMemes() {
-    project.getRootPane().toOptional()
-      .ifPresent { rootPane ->
-        dismissAllMemesInPane(rootPane)
+    runOnUiThread {
+      project.getRootPane().toOptional()
+        .ifPresent { rootPane ->
+          dismissAllMemesInPane(rootPane)
 
-        // be paranoid and try to remove things again
-        if (rootPane.getComponentCountInLayer(MemePanel.PANEL_LAYER) > 0) {
-          rootPane.getComponentsInLayer(MemePanel.PANEL_LAYER)
-            .filterIsInstance<MemePanel>()
-            .forEach {
-              rootPane.remove(it)
-            }
+          // be paranoid and try to remove things again
+          if (rootPane.getComponentCountInLayer(MemePanel.PANEL_LAYER) > 0) {
+            rootPane.getComponentsInLayer(MemePanel.PANEL_LAYER)
+              .filterIsInstance<MemePanel>()
+              .forEach {
+                rootPane.remove(it)
+              }
+          }
+
+          rootPane.revalidate()
+          rootPane.repaint()
         }
+    }
+  }
 
-        rootPane.revalidate()
-        rootPane.repaint()
-      }
+  private fun runOnUiThread(action: () -> Unit) {
+    val application = ApplicationManager.getApplication()
+    val guardedAction = {
+      if (project.isDisposed.not()) action()
+    }
+    if (application.isDispatchThread) {
+      guardedAction()
+    } else {
+      application.invokeLater({ guardedAction() }, ModalityState.any())
+    }
   }
 
   private fun dismissAllMemesInPane(rootPane: JLayeredPane) {

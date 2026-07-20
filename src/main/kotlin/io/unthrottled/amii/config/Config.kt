@@ -1,8 +1,8 @@
 package io.unthrottled.amii.config
 
 import com.intellij.openapi.application.Application
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
-import com.intellij.openapi.components.ServiceManager
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.util.xmlb.XmlSerializerUtil.copyBean
@@ -25,7 +25,7 @@ class Config : PersistentStateComponent<Config>, Cloneable {
   companion object {
     @JvmStatic
     val instance: Config
-      get() = ServiceManager.getService(Config::class.java)
+      get() = ApplicationManager.getApplication().getService(Config::class.java)
     const val DEFAULT_DELIMITER = ","
     const val DEFAULT_IDLE_TIMEOUT_IN_MINUTES: Long = 5L
     const val DEFAULT_SILENCE_TIMEOUT_IN_MINUTES: Long = 20L
