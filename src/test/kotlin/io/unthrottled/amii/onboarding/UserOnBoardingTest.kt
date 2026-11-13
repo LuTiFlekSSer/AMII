@@ -6,6 +6,6 @@ import org.junit.Test
 class UserOnBoardingTest {
   @Test
   fun `reads the packaged plugin version without IntelliJ internal APIs`() {
-    assertThat(UserOnBoarding.getVersion()).contains("1.7.0")
+    assertThat(UserOnBoarding.getVersion()).contains("1.7.1")
   }
 }

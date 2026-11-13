@@ -1,6 +1,5 @@
 package io.unthrottled.amii.config.ui;
 
-import com.intellij.execution.ExecutionBundle;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.ActionToolbar;
@@ -133,7 +132,7 @@ public class CustomMemeList {
 
   private void createUIComponents() {
     textFieldWithBrowseButton = new TextFieldWithBrowseButton();
-    textFieldWithBrowseButton.addActionListener(new ComponentWithBrowseButton.BrowseFolderActionListener<>(ExecutionBundle.message("select.working.directory.message"), null,
+    textFieldWithBrowseButton.addActionListener(new ComponentWithBrowseButton.BrowseFolderActionListener<>(PluginMessageBundle.message("select.working.directory.message"), null,
       textFieldWithBrowseButton,
       Arrays.stream(ProjectManager.getInstance().getOpenProjects()).findFirst().orElse(
         ProjectManager.getInstance().getDefaultProject()

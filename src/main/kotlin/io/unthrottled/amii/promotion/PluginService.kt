@@ -1,9 +1,8 @@
 package io.unthrottled.amii.promotion
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.core.type.TypeReference
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
+import com.google.gson.reflect.TypeToken
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.application.ex.ApplicationInfoEx
@@ -20,7 +19,7 @@ import java.util.Collections
 
 object PluginService : Logging {
 
-  private val objectMapper by lazy { ObjectMapper() }
+  private val gson by lazy { Gson() }
 
   private val PLUGIN_MANAGER_URL by lazy {
     ApplicationInfo.getInstance()
@@ -69,13 +68,12 @@ object PluginService : Logging {
    * [externalUpdateId] update ID from Plugin Repository database.
    * [externalPluginId] plugin ID from Plugin Repository database.
    */
-  @JsonIgnoreProperties(ignoreUnknown = true)
   data class IdeCompatibleUpdate(
-    @get:JsonProperty("id")
+    @SerializedName("id")
     val externalUpdateId: String = "",
-    @get:JsonProperty("pluginId")
+    @SerializedName("pluginId")
     val externalPluginId: String = "",
-    @get:JsonProperty("pluginXmlId")
+    @SerializedName("pluginXmlId")
     val pluginId: String = "",
     val version: String = ""
   )
@@ -88,7 +86,7 @@ object PluginService : Logging {
         return emptyList()
       }
 
-      val data = objectMapper.writeValueAsString(
+      val data = gson.toJson(
         CompatibleUpdateRequest(
           ApplicationInfo.getInstance()
             .build.asString(),
@@ -103,7 +101,9 @@ object PluginService : Logging {
         .throwStatusCodeException(false)
         .connect {
           it.write(data)
-          objectMapper.readValue(it.inputStream, object : TypeReference<List<IdeCompatibleUpdate>>() {})
+          it.inputStream.bufferedReader().use { reader ->
+            gson.fromJson(reader, object : TypeToken<List<IdeCompatibleUpdate>>() {}) ?: emptyList()
+          }
         }
     } catch (e: Exception) {
       logger().warn("Unable to check to see if plugin $ids is compatible for reasons", e)

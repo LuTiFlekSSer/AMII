@@ -99,6 +99,10 @@ dependencies {
       bundledModule("intellij.platform.testRunner")
       bundledModule("intellij.platform.ui.jcef")
     }
+    if (localIdeBuildMajor.get() >= 263) {
+      bundledModule("intellij.platform.externalSystem")
+      bundledModule("intellij.platform.externalSystem.impl")
+    }
 
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file for plugin from JetBrains Marketplace.
     plugins(

@@ -2,6 +2,10 @@
 
 # AMII Changelog
 
+## [1.7.1]
+
+- Added IntelliJ Platform 2026.3 build support.
+
 ## [1.7.0]
 
 ### Added
